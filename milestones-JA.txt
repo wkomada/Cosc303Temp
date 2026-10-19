@@ -1,0 +1,37 @@
+milestones-JA.txt
+Jake Atwood
+COSC303, 10/19/2026
+
+# Main GitHub Link: https://github.com/wkomada/Cosc303Temp
+## NOTE: We are still trying to figure out the best way to make a GitHub separate from the main Lunabotics group one, that will still easily allow us to put code into the main one if we desire. As for now this is the solution we have found, but may change in the future.
+
+# Current To-Do List:
+- Structuring Autonomy Repo
+- Set Up Environment
+- Turn Point Cloud Into Topological
+- Implement A*
+
+# Progress Summary:
+I did a good amount of research into how we can get our robot's lidar system working, as well as looking into the different settings we could run the lidar with. As for compilable code, I created a program that randomly generates point-cloud data, that we can eventually use to test our pathfinding algorithms.
+
+# Reflection:
+I had to make the point-cloud data generator because we aren't able to actually test the lidar yet (didn't have all of the necessary cables when we went to see the robot), and I needed something that compiled. As a result, I wasn't able to really start on any of the milestones we had laid out, nor anything on the actual to-do list. With that said, the point-cloud data generator should prove useful for when we start writing the A*/Dijkstra's algorithms.
+
+# Next Step Plan:
+Actually get the lidar system to work, and figure out how to receive the data so we can actually begin to map out the environment and begin working on pathfinding algorithms. From there start on the basic pathfinding programs.
+
+# Individual Code Contribution:
+I created the entire pointcloud_gen.cpp file and all of the code within it.
+
+# Time Log:
+## 2 HOURS (10/15/2026 18:00-20:00): Reading https://github.com/unitreerobotics/unilidar_sdk2 and https://github.com/PointCloudLibrary/pcl/releases repositories to familiarize with the lidar we are using (Unilidar SDK2) [2 HOURS TOTAL]
+## 2 HOURS (10/18/2026 21:20-23:20): Started working on a program to generate point cloud data to be analyzed by the future A* programs. [4 HOURS TOTAL]
+## 1 HOUR (10/19/2026 10:40-11:40): Continued working on the pointcloud_gen.cpp program to get it to compile. Also made the milestones-JA.txt file in this time. [5 HOURS TOTAL]
+
+# Milestone Rubric
+- 5 pts: Point-cloud test data generator (pointcloud_gen.cpp) [COMPLETE]
+- 5 pts: Autonomy repo structure and environment setup
+- 8 pts: Lidar set-up, connect to the Unilidar, successfully receive and parse point-cloud data
+- 8 pts: Convert point cloud into a topological map with obstacle detection
+- 8 pts: Implement A* pathfinding on the generated map
+- 6 pts: Testing on generated and real data, plus documentation
