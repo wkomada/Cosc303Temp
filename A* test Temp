@@ -1,0 +1,231 @@
+// build: g++ -std=c++17 -O2 -Wall -o astar astar_map.cpp
+// usage: ./astar [w] [h] [seed] [diag 0/1] [hmode] [trace_n]
+//
+//   hmode:  0 = h=0            (should behave exactly like Dijkstra)
+//           1 = manhattan*1    (admissible, the "correct" one)
+//           2 = manhattan*5    (avg cell cost... inadmissible, see below)
+//           3 = manhattan*3    (weighted A*, greedy-ish)
+//          -1 = run ALL of them on the same map and print a table  - most useful
+//
+//   trace_n: print the first N node expansions with g/h/f so I can follow along
+//
+// map = grid of ints 1..9, value = cost to ENTER that cell. start is free.
+
+#include <algorithm>
+#include <climits>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
+#include <queue>
+#include <random>
+#include <vector>
+
+using namespace std; 
+
+const int MIN_COST = 1;
+const int MAX_COST = 9;
+
+// #define DEBUG_EVERY_NODE   // WAY too noisy past ~10x10, use trace_n instead
+
+struct P { int x, y; };
+
+int W, H;
+vector<int> cost;       // flat, row-major: cost[y*W + x]
+bool DIAG = false;
+int TRACE_N = 0;
+
+int at(int x, int y) { return cost[y * W + x]; }
+
+void makeMap(unsigned seed) {
+    mt19937 rng(seed);
+    uniform_int_distribution<int> d(MIN_COST, MAX_COST);
+    cost.resize(W * H);
+    for (auto& c : cost) c = d(rng);
+}
+
+// ---------------------------------------------------------------- heuristics
+enum HMode { H_ZERO = 0, H_MANHATTAN = 1, H_AVG = 2, H_WEIGHTED = 3 };
+const char* hname[] = {"h=0 (Dijkstra)", "manhattan*1", "manhattan*5", "manhattan*3"};
+
+int h(P a, P b, int mode) {
+    int dx = abs(a.x - b.x), dy = abs(a.y - b.y);
+    int steps = DIAG ? max(dx, dy) : dx + dy;  
+    switch (mode) {
+        case H_ZERO:      return 0;
+        case H_MANHATTAN: return steps * MIN_COST;   // can never overestimate - admissible
+        // tried using the AVERAGE cell cost (5) since it "feels" more accurate.
+        // it's NOT admissible: a cheap corridor of 1s beats the estimate, so A*
+        // can return a path that isn't the cheapest. check the compare table.
+        case H_AVG:       return steps * 5;
+        case H_WEIGHTED:  return steps * MIN_COST * 3;
+    }
+    return 0;
+}
+
+// -------------------------------------------------------------------- search
+struct Result {
+    bool found = false;
+    int total = 0;
+    int expanded = 0;   // nodes popped AND processed
+    int pushes = 0;     // everything ever pushed on the heap
+    int stale = 0;      // popped but already closed (lazy deletion)
+    vector<int> path;   // cell indices start - goal
+    vector<int> order;  // order[i] = Nth node expanded, 0 = never expanded
+};
+
+// --- kept for reference (linear scan for best f, O(n) per pop) ---
+// vector<Node> open;
+// while (!open.empty()) {
+//     auto best = min_element(open.begin(), open.end(),
+//                             [](auto& a, auto& b) { return a.f < b.f; });
+//     Node cur = *best;
+//     open.erase(best);
+//     ...
+// }
+// worked but crawled on 200x200. priority_queue it is.
+
+Result astar(P s, P g, int mode) {
+    Result r;
+    vector<int> G(W * H, INT_MAX);   // best known cost-so-far
+    vector<int> par(W * H, -1);
+    vector<char> closed(W * H, 0);
+    r.order.assign(W * H, 0);
+
+    struct N { int f, g, x, y; };
+    // tie-break: bigger g first. same f but deeper = closer to goal. cut expansions a bit.
+    auto cmp = [](const N& a, const N& b) { return a.f != b.f ? a.f > b.f : a.g < b.g; };
+    priority_queue<N, vector<N>, decltype(cmp)> open(cmp);
+
+    G[s.y * W + s.x] = 0;
+    open.push({h(s, g, mode), 0, s.x, s.y});
+    r.pushes++;
+
+    const int DX[] = {1, -1, 0, 0, 1, 1, -1, -1};
+    const int DY[] = {0, 0, 1, -1, 1, -1, 1, -1};
+    int ndirs = DIAG ? 8 : 4;
+
+    while (!open.empty()) {
+        N cur = open.top();
+        open.pop();
+        int ci = cur.y * W + cur.x;
+
+        // std::priority_queue has no decrease-key, so I just push duplicates and
+        // skip the old ones here. (this is the "stale" counter)
+        if (closed[ci]) { r.stale++; continue; }
+        closed[ci] = 1;
+        r.expanded++;
+        r.order[ci] = r.expanded;
+
+        if (TRACE_N && r.expanded <= TRACE_N) {
+            int hh = h({cur.x, cur.y}, g, mode);
+            cout << "  #" << setw(3) << r.expanded << "  (" << setw(2) << cur.x << ","
+                 << setw(2) << cur.y << ")  g=" << setw(3) << cur.g
+                 << " h=" << setw(3) << hh << " f=" << setw(3) << cur.f
+                 << "  heap=" << open.size() << "\n";
+        }
+#ifdef DEBUG_EVERY_NODE
+        cerr << "pop " << cur.x << "," << cur.y << " f=" << cur.f << "\n";
+#endif
+
+        if (cur.x == g.x && cur.y == g.y) {
+            r.found = true;
+            r.total = cur.g;
+            for (int i = ci; i != -1; i = par[i]) r.path.push_back(i);
+            reverse(r.path.begin(), r.path.end());
+            return r;
+        }
+
+        for (int k = 0; k < ndirs; k++) {
+            int nx = cur.x + DX[k], ny = cur.y + DY[k];
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            int ni = ny * W + nx;
+            if (closed[ni]) continue;   // NOTE: never reopen closed nodes. fine when h is
+                                        // consistent, is part of why mode 2/3 go wrong.
+            int ng = cur.g + at(nx, ny);
+            if (ng < G[ni]) {
+                G[ni] = ng;
+                par[ni] = ci;
+                open.push({ng + h({nx, ny}, g, mode), ng, nx, ny});
+                r.pushes++;
+            }
+        }
+    }
+    return r;
+}
+
+// ------------------------------------------------------------------ printing
+// yellow = path, blue = expanded but not on path, plain = never looked at
+void show(const Result& r, P s, P g) {
+    vector<char> onPath(W * H, 0);
+    for (int i : r.path) onPath[i] = 1;
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int i = y * W + x;
+            if (x == s.x && y == s.y)      cout << "\033[1;32m S\033[0m";
+            else if (x == g.x && y == g.y) cout << "\033[1;31m G\033[0m";
+            else if (onPath[i])            cout << "\033[1;33m" << setw(2) << at(x, y) << "\033[0m";
+            else if (r.order[i])           cout << "\033[34m" << setw(2) << at(x, y) << "\033[0m";
+            else                           cout << setw(2) << at(x, y);
+            cout << ' ';
+        }
+        cout << '\n';
+    }
+}
+
+// raw map only, no path (handy when checking the generator)
+void dumpMap() {
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) cout << setw(2) << at(x, y) << ' ';
+        cout << '\n';
+    }
+}
+
+int main(int argc, char** argv) {
+    W = argc > 1 ? atoi(argv[1]) : 20;
+    H = argc > 2 ? atoi(argv[2]) : 10;
+    unsigned seed = argc > 3 ? (unsigned)atoi(argv[3]) : random_device{}();
+    DIAG = argc > 4 ? atoi(argv[4]) != 0 : false;
+    int mode = argc > 5 ? atoi(argv[5]) : H_MANHATTAN;
+    TRACE_N = argc > 6 ? atoi(argv[6]) : 0;
+
+    if (W < 2 || H < 2) { cerr << "grid too small\n"; return 1; }
+
+    makeMap(seed);
+    P s{0, 0}, g{W - 1, H - 1};   // TODO: random start/goal? or pass on cmdline
+
+    cout << W << "x" << H << "  seed=" << seed << "  " << (DIAG ? "8-way" : "4-way") << "\n\n";
+
+    if (mode == -1) {
+        // run every heuristic on the same map and compare
+        cout << left << setw(18) << "heuristic" << right << setw(8) << "cost"
+             << setw(10) << "expanded" << setw(8) << "pushes" << setw(8) << "stale"
+             << setw(8) << "len" << "\n";
+        int dijkstraCost = -1;
+        for (int m = 0; m < 4; m++) {
+            Result r = astar(s, g, m);
+            if (m == 0) dijkstraCost = r.total;
+            cout << left << setw(18) << hname[m] << right << setw(8) << r.total
+                 << setw(10) << r.expanded << setw(8) << r.pushes << setw(8) << r.stale
+                 << setw(8) << r.path.size();
+            if (r.total != dijkstraCost) cout << "   <-- worse than optimal by " << r.total - dijkstraCost;
+            cout << "\n";
+        }
+        // sanity: admissible A* must match Dijkstra's cost. if this ever fires my h is broken
+        if (astar(s, g, H_MANHATTAN).total != dijkstraCost) cout << "!! A* != Dijkstra, bug\n";
+        return 0;
+    }
+
+    if (TRACE_N) cout << "trace (" << hname[mode] << "):\n";
+    Result r = astar(s, g, mode);
+    // dumpMap();
+    cout << (TRACE_N ? "\n" : "");
+    show(r, s, g);
+
+    cout << "\n" << hname[mode] << ": ";
+    if (r.found)
+        cout << "cost " << r.total << ", path " << r.path.size() << " cells, expanded "
+             << r.expanded << ", pushes " << r.pushes << ", stale " << r.stale << "\n";
+    else
+        cout << "no path??\n";
+    return 0;
+}
